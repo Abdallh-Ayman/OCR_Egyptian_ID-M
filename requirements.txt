@@ -1,7 +1,5 @@
 streamlit
 pillow
 opencv-python
-numpy
-pytesseract
-ultralytics
 easyocr
+ultralytics
