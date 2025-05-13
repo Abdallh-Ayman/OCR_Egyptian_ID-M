@@ -212,19 +212,19 @@ def decode_egyptian_id(id_number):
     }
 
 
-# def show_image(image, title="Image"):
-#     # This function will open a new window if called.
-#     # In a web app context, this might not be ideal.
-#     # Consider commenting out calls to this if pop-ups are an issue.
-#     try:
-#         rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-#         plt.figure(figsize=(10, 8))
-#         plt.imshow(rgb_image)
-#         plt.title(title)
-#         plt.axis("off")
-#         plt.show()
-#     except Exception as e:
-#         print(f"Error in show_image: {e}")
+def show_image(image, title="Image"):
+    # This function will open a new window if called.
+    # In a web app context, this might not be ideal.
+    # Consider commenting out calls to this if pop-ups are an issue.
+    try:
+        rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        plt.figure(figsize=(10, 8))
+        plt.imshow(rgb_image)
+        plt.title(title)
+        plt.axis("off")
+        plt.show()
+    except Exception as e:
+        print(f"Error in show_image: {e}")
 
 
 def process_image(cropped_image):
@@ -254,7 +254,7 @@ def process_image(cropped_image):
             # Default: no expansion
             expanded_bbox = bbox
 
-            if class_name == 'nid':
+            if class_name in( 'nid' , 'invalid_nid'):
                 # Ensure bbox is valid before expansion
                 if bbox[2] > bbox[0] and bbox[3] > bbox[1]:
                     expanded_bbox = expand_bbox_more_custom(bbox, x_min_shift=0.1, x_max_shift=0.1, y_min_shift=.3,
@@ -266,7 +266,7 @@ def process_image(cropped_image):
                 else:
                     print(f"Skipping NID due to invalid initial bbox: {bbox}")
 
-            elif class_name == 'lastName':  # This seems to be used for full_name
+            elif class_name in(  'lastName' , 'invalid_lastName') :  # This seems to be used for full_name
                 if bbox[2] > bbox[0] and bbox[3] > bbox[1]:
                     expanded_bbox = expand_bbox_more_custom(bbox, x_min_shift=0.09, x_max_shift=0.09, y_min_shift=1.2,
                                                             y_max_shift=0.04, image_shape=cropped_image.shape)
@@ -274,7 +274,7 @@ def process_image(cropped_image):
                 else:
                     print(f"Skipping lastName due to invalid initial bbox: {bbox}")
 
-            elif class_name == 'address':
+            elif class_name in(  'address' ,'invalid_address'):
                 if bbox[2] > bbox[0] and bbox[3] > bbox[1]:
                     expanded_bbox = expand_bbox_custom(bbox, scale_w=1.2, scale_h=1.1, image_shape=cropped_image.shape)
                     address = extract_text(cropped_image, expanded_bbox, lang='ara')
@@ -338,9 +338,11 @@ def process_image(cropped_image):
         return (job, expiry, status, issue, expiry_conf)  # expiry_conf is always 0.0 as per current logic
 
 
-INVALID_ID_MESSAGE = "Input does not appear to be a valid Egyptian ID card."
 
-def detect_and_process_id_card(image_path, id_card_confidence_threshold=0.5): # Added confidence threshold
+
+def detect_and_process_id_card(image_path, id_card_confidence_threshold=0.7):
+    INVALID_ID_MESSAGE = "Input does not appear to be a valid Egyptian ID card."
+
     """
     Detects an Egyptian ID card, processes it, and validates the result.
 
@@ -375,7 +377,9 @@ def detect_and_process_id_card(image_path, id_card_confidence_threshold=0.5): # 
         print(f"Exception reading image {image_path}: {e}")
         return None # Indicate image read failure specifically
 
+    #show_image(image, title="Cropped Field (Original BGR)")
     id_card_results = id_card_model(image, verbose=False)
+    #show_image(id_card_results, title="Cropped Field (Original BGR)")
 
     best_detection = None # Store the best candidate detection
 
@@ -409,6 +413,7 @@ def detect_and_process_id_card(image_path, id_card_confidence_threshold=0.5): # 
 
         cropped_image = image[y1:y2, x1:x2]
 
+
         if cropped_image.size == 0:
             print(f"Warning: Cropped ID card image is empty for box {[x1, y1, x2, y2]}.")
             return INVALID_ID_MESSAGE # Treat as invalid if crop is empty
@@ -426,7 +431,8 @@ def detect_and_process_id_card(image_path, id_card_confidence_threshold=0.5): # 
                      print("Validation: Detected Front ID structure with key fields.")
                      is_valid = True
                 else:
-                     print("Validation Failed: Front structure missing key fields (NID/Name).")
+                    INVALID_ID_MESSAGE ="Please give me another clear image as Validation Failed: Front structure missing key fields (NID/Name)."
+                    return INVALID_ID_MESSAGE
             elif len(processed_data) == 5: # Expected back card structure
                 job, expiry, status, issue, expiry_conf = processed_data
                 # Check if key fields were actually extracted
@@ -460,12 +466,12 @@ def detect_and_process_id_card(image_path, id_card_confidence_threshold=0.5): # 
 def main():
     # Example usage:
     # Use one of the provided example images
-    image_file = r"E:\ITI BI\we_tasks\all_files\hamada_f.jpg" # Replace with actual path
+    image_file = r"E:\ITI BI\we_tasks\all_files\test1.jpg" # Replace with actual path
     # Or test with a non-ID image:
     # image_file = "path/to/your/non_id_image.jpg"
 
     print(f"Processing image: {image_file}")
-    result_data = detect_and_process_id_card(image_file, id_card_confidence_threshold=0.6) # Adjust threshold as needed
+    result_data = detect_and_process_id_card(image_file, id_card_confidence_threshold=.6) # Adjust threshold as needed
 
     # Updated result handling
     if isinstance(result_data, tuple): # Check if we got a valid data tuple
