@@ -3,3 +3,5 @@ pillow
 opencv-python-headless
 easyocr
 ultralytics
+torch
+torchvision
