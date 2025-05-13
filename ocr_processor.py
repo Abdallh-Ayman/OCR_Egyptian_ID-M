@@ -212,19 +212,19 @@ def decode_egyptian_id(id_number):
     }
 
 
-def show_image(image, title="Image"):
-    # This function will open a new window if called.
-    # In a web app context, this might not be ideal.
-    # Consider commenting out calls to this if pop-ups are an issue.
-    try:
-        rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        plt.figure(figsize=(10, 8))
-        plt.imshow(rgb_image)
-        plt.title(title)
-        plt.axis("off")
-        plt.show()
-    except Exception as e:
-        print(f"Error in show_image: {e}")
+# def show_image(image, title="Image"):
+#     # This function will open a new window if called.
+#     # In a web app context, this might not be ideal.
+#     # Consider commenting out calls to this if pop-ups are an issue.
+#     try:
+#         rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+#         plt.figure(figsize=(10, 8))
+#         plt.imshow(rgb_image)
+#         plt.title(title)
+#         plt.axis("off")
+#         plt.show()
+#     except Exception as e:
+#         print(f"Error in show_image: {e}")
 
 
 def process_image(cropped_image):
@@ -241,6 +241,7 @@ def process_image(cropped_image):
     expiry_conf = 0.0  # This was defined but not used later, keeping for consistency
 
     detected_fields_image = cropped_image.copy()  # Work on a copy for drawing
+
 
     for result_item in results:  # Renamed result to result_item to avoid conflict with module
         for box in result_item.boxes:
@@ -337,59 +338,138 @@ def process_image(cropped_image):
         return (job, expiry, status, issue, expiry_conf)  # expiry_conf is always 0.0 as per current logic
 
 
-def detect_and_process_id_card(image_path):
-    id_card_model = YOLO('detect_id_card.pt')  # Make sure 'detect_id_card.pt' is in the same directory
+INVALID_ID_MESSAGE = "Input does not appear to be a valid Egyptian ID card."
+
+def detect_and_process_id_card(image_path, id_card_confidence_threshold=0.5): # Added confidence threshold
+    """
+    Detects an Egyptian ID card, processes it, and validates the result.
+
+    Args:
+        image_path (str): Path to the input image.
+        id_card_confidence_threshold (float): Minimum confidence for the initial ID card detection.
+
+    Returns:
+        tuple: Extracted data if successful (7 elements for front, 5 for back).
+        str: INVALID_ID_MESSAGE if no valid Egyptian ID is detected or processed.
+        None: If there was an image reading error.
+    """
+    # Check if EasyOCR initialized correctly
+    if reader is None:
+        print("EasyOCR Reader not initialized. Cannot process.")
+        # You might want to return a specific error message or raise an exception here
+        # For simplicity, we'll let it potentially fail later or return the generic invalid message.
+        # Consider returning "ERROR: OCR engine not ready."
+
+    try:
+        id_card_model = YOLO('detect_id_card.pt') # Load model inside try block if path might be wrong
+    except Exception as e:
+        print(f"Error loading ID card detection model (detect_id_card.pt): {e}")
+        return "ERROR: ID Card detection model failed to load." # More specific error
 
     try:
         image = cv2.imread(image_path)
         if image is None:
             print(f"Error: Could not read image from path: {image_path}")
-            return None
+            return None # Indicate image read failure specifically
     except Exception as e:
         print(f"Exception reading image {image_path}: {e}")
-        return None
+        return None # Indicate image read failure specifically
 
-    id_card_results = id_card_model(image, verbose=False)  # Pass image object, verbose=False
+    id_card_results = id_card_model(image, verbose=False)
 
-    # Process the first detected ID card if any
-    for result_item in id_card_results:  # Renamed result to result_item
-        if len(result_item.boxes) > 0:
-            # Assuming the first detected box is the ID card
-            box = result_item.boxes[0]
-            x1, y1, x2, y2 = map(int, box.xyxy[0])
+    best_detection = None # Store the best candidate detection
 
-            # Ensure coordinates are valid before cropping
-            if x1 >= x2 or y1 >= y2:
-                print(f"Invalid bounding box for ID card: {[x1, y1, x2, y2]}. Skipping.")
-                continue  # Or handle error appropriately
+    for result_item in id_card_results:
+        for box in result_item.boxes:
+            confidence = float(box.conf[0].item())
+            class_id = int(box.cls[0].item())
+            class_name = result_item.names[class_id] # Get class name
 
-            cropped_image = image[y1:y2, x1:x2]
+            # **Crucial Check 1: Class Name (If applicable) and Confidence**
+            # *Modify this 'if' condition if your model has specific class names*
+            # Example: if class_name in ['egyptian_id_front', 'egyptian_id_back'] and confidence >= id_card_confidence_threshold:
+            # If your model only has a generic 'id_card' class, just use confidence:
+            if confidence >= id_card_confidence_threshold:
+                 # Optional: Check if class_name suggests it's a card type if model supports it
+                 print(f"Detected potential card '{class_name}' with confidence {confidence:.2f}")
+                 if best_detection is None or confidence > best_detection['confidence']:
+                    best_detection = {'box': box, 'confidence': confidence, 'image_shape': image.shape}
+            else:
+                 print(f"Skipping detection with low confidence {confidence:.2f}")
 
-            if cropped_image.size == 0:
-                print(f"Warning: Cropped ID card image is empty for box {[x1, y1, x2, y2]}.")
-                continue
 
-            return process_image(cropped_image)  # Process the first detected card
+    if best_detection:
+        box = best_detection['box']
+        x1, y1, x2, y2 = map(int, box.xyxy[0])
 
-    print("No ID card detected in the image.")
-    return None  # Return None if no ID card is detected or processed
+        # Ensure coordinates are valid before cropping
+        if x1 >= x2 or y1 >= y2 or x1 < 0 or y1 < 0 or x2 > image.shape[1] or y2 > image.shape[0]:
+            print(f"Invalid bounding box for detected ID card: {[x1, y1, x2, y2]}. Skipping.")
+            return INVALID_ID_MESSAGE # Treat as invalid if box is bad
 
+        cropped_image = image[y1:y2, x1:x2]
+
+        if cropped_image.size == 0:
+            print(f"Warning: Cropped ID card image is empty for box {[x1, y1, x2, y2]}.")
+            return INVALID_ID_MESSAGE # Treat as invalid if crop is empty
+
+        # Process the cropped potential ID card
+        processed_data = process_image(cropped_image)
+
+        # **Crucial Check 2: Validate the processed data structure and content**
+        if processed_data:
+            is_valid = False
+            if len(processed_data) == 7: # Expected front card structure
+                nid, birth_date, gov, gender, conf, name, addr = processed_data
+                # Check if key fields were actually extracted (not empty or just noise)
+                if nid and len(nid) >= 13 and name: # Require NID and Name at minimum for front
+                     print("Validation: Detected Front ID structure with key fields.")
+                     is_valid = True
+                else:
+                     print("Validation Failed: Front structure missing key fields (NID/Name).")
+            elif len(processed_data) == 5: # Expected back card structure
+                job, expiry, status, issue, expiry_conf = processed_data
+                # Check if key fields were actually extracted
+                if job or expiry: # Require Job or Expiry at minimum for back
+                    print("Validation: Detected Back ID structure with key fields.")
+                    is_valid = True
+                else:
+                    print("Validation Failed: Back structure missing key fields (Job/Expiry).")
+            else:
+                 print("Validation Failed: Unexpected data structure returned by process_image.")
+
+
+            if is_valid:
+                return processed_data # Return the valid tuple
+            else:
+                return INVALID_ID_MESSAGE # Return rejection message if validation fails
+
+        else:
+            # process_image returned None or empty
+            print("Processing the cropped image failed to return data.")
+            return INVALID_ID_MESSAGE
+
+    else:
+        # No detection met the confidence/class criteria
+        print(f"No suitable ID card detected meeting the threshold ({id_card_confidence_threshold}).")
+        return INVALID_ID_MESSAGE
+
+
+# --- [Keep your main function, but update its result handling] ---
 
 def main():
-    # Example usage: Replace "Dina_test.jpg" with your image path
-    # Ensure the image "Dina_test.jpg" exists in the same directory or provide the full path.
-    image_file = "Dina_test.jpg"  # Make sure this image exists for testing
-
-    # Check if reader initialized correctly
-    if reader is None:
-        print("Cannot run main: EasyOCR Reader failed to initialize.")
-        return
+    # Example usage:
+    # Use one of the provided example images
+    image_file = r"E:\ITI BI\we_tasks\all_files\hamada_f.jpg" # Replace with actual path
+    # Or test with a non-ID image:
+    # image_file = "path/to/your/non_id_image.jpg"
 
     print(f"Processing image: {image_file}")
-    result_data = detect_and_process_id_card(image_file)
+    result_data = detect_and_process_id_card(image_file, id_card_confidence_threshold=0.6) # Adjust threshold as needed
 
-    if result_data:
-        if len(result_data) == 7:  # Corresponds to (nid, birth_date, governorate, gender, conf, full_name, address)
+    # Updated result handling
+    if isinstance(result_data, tuple): # Check if we got a valid data tuple
+        if len(result_data) == 7:
             id_number, birth_date, governorate, gender, conf_score, full_name_val, address_val = result_data
             print("\n--- Extracted ID Card Front Information ---")
             print(f"National ID: {id_number}")
@@ -399,20 +479,28 @@ def main():
             print(f"Birth Date: {birth_date}")
             print(f"Governorate: {governorate}")
             print(f"Gender: {gender}")
-        elif len(result_data) == 5:  # Corresponds to (job, expiry, status, issue, expiry_conf)
+        elif len(result_data) == 5:
             job_val, expiry_val, status_val, issue_val, expiry_conf_score = result_data
-            print("\n--- Extracted ID Card Other Information ---")
+            print("\n--- Extracted ID Card Back Information ---")
             print(f"Job: {job_val}")
             print(f"Expiry Date: {expiry_val}")
             print(f"Marital Status/Demo: {status_val}")
             print(f"Issue Place/Date: {issue_val}")
-            # print(f"Expiry Confidence: {expiry_conf_score}") # expiry_conf is currently always 0.0
-        else:
-            print("\n--- Unexpected result format ---")
-            print(result_data)
+            # print(f"Expiry Confidence: {expiry_conf_score}")
+        # No need for an else here because we checked isinstance(tuple)
+
+    elif isinstance(result_data, str): # Check if it's the error/rejection message
+        print(f"\nResult: {result_data}") # Print the message (e.g., INVALID_ID_MESSAGE)
+    elif result_data is None:
+        print("\nError: Could not read the input image file.")
     else:
-        print("\nNo information extracted or ID card not detected.")
+        print("\n--- Unexpected result format ---")
+        print(result_data)
 
 
 if __name__ == "__main__":
-    main()
+    # Ensure EasyOCR is ready before running main
+    if reader is None:
+         print("Cannot run main: EasyOCR Reader failed to initialize.")
+    else:
+         main()
