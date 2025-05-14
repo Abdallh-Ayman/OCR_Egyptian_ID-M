@@ -291,7 +291,7 @@ def process_image(cropped_image):
 
             elif class_name == 'expiry':
                 if bbox[2] > bbox[0] and bbox[3] > bbox[1]:
-                    expanded_bbox = expand_bbox_more_custom(bbox, x_min_shift=0.3, x_max_shift=0.1, y_min_shift=0.3,
+                    expanded_bbox = expand_bbox_more_custom(bbox, x_min_shift=0.5, x_max_shift=0.1, y_min_shift=0.3,
                                                             y_max_shift=0.3, image_shape=cropped_image.shape)
                     expiry = extract_text(cropped_image, expanded_bbox, lang='ara')
                 else:
